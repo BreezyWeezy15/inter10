@@ -15,8 +15,8 @@ import com.google.gson.reflect.TypeToken
  *
  * Responsibilities:
  * - Generate or load a list of items from SharedPreferences.
- * - Track the currently selected item.
- * - Persist both the item list and selected item across app restarts.
+ * - Track the currently selected item(s).
+ * - Persist both the item list and selected item IDs across app restarts.
  *
  * This ViewModel uses Gson to serialize/deserialize the item list into JSON
  * for persistence via SharedPreferences.
@@ -24,64 +24,76 @@ import com.google.gson.reflect.TypeToken
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    // SharedPreferences for persisting selected item and item list
+    // SharedPreferences instance for persistence
     private val prefs = application.getSharedPreferences("ItemPrefs", Context.MODE_PRIVATE)
 
-    // Gson instance for serializing/deserializing item list
+    // Gson instance for JSON serialization/deserialization
     private val gson = Gson()
 
-    // Backing property for the LiveData item list
+    // LiveData holding the list of items
     private val _items = MutableLiveData<List<Item>>()
-
-    /** Public LiveData containing the list of items */
     val items: LiveData<List<Item>> = _items
 
-    // Backing property for the LiveData selected item ID
-    private val _selectedId = MutableLiveData<Int?>()
-
-    /** Public LiveData representing the ID of the currently selected item */
-    val selectedId: LiveData<Int?> = _selectedId
+    // LiveData holding the set of selected item IDs
+    private val _selectedIds = MutableLiveData<Set<Int>>(emptySet())
+    val selectedIds: LiveData<Set<Int>> = _selectedIds
 
     companion object {
-        private const val SELECTED_ID_KEY = "SelectedId"  // Key for selected item ID
-        private const val ITEMS_KEY = "ItemList"          // Key for item list
+        private const val SELECTED_IDS_KEY = "SelectedIds" // Key for selected item IDs in SharedPreferences
+        private const val ITEMS_KEY = "ItemList"           // Key for item list in SharedPreferences
     }
 
     init {
-        // Attempt to load previously saved item list from SharedPreferences
+        // Load item list from SharedPreferences, or create and save a default list if not present
         val savedListJson = prefs.getString(ITEMS_KEY, null)
-
         val itemList = if (savedListJson != null) {
-            // Deserialize saved list from JSON
             val type = object : TypeToken<List<Item>>() {}.type
             gson.fromJson(savedListJson, type)
         } else {
-            // No saved list, generate a default list of 20 items
             val newList = List(20) { Item(it, "Item ${it + 1}") }
             saveItemList(newList)
             newList
         }
-
         _items.value = itemList
 
-        // Load previously selected item ID if available
-        _selectedId.value = prefs.getInt(SELECTED_ID_KEY, -1).takeIf { it != -1 }
+        // Load selected item IDs from SharedPreferences
+        val savedIds = prefs.getStringSet(SELECTED_IDS_KEY, emptySet())
+            ?.mapNotNull { it.toIntOrNull() }
+            ?.toSet()
+            ?: emptySet()
+        _selectedIds.value = savedIds
     }
 
     /**
-     * Selects an item, persists its ID to SharedPreferences,
-     * and updates LiveData to notify observers.
+     * Toggle selection state of a given item.
+     * Adds the item ID to the selected set if not selected, or removes it if already selected.
+     * Updates and saves the new selected set to SharedPreferences.
      */
-    fun selectItem(item: Item) {
-        _selectedId.value = item.id
-        prefs.edit { putInt(SELECTED_ID_KEY, item.id) }
+    fun toggleItemSelection(item: Item) {
+        val currentSet = _selectedIds.value?.toMutableSet() ?: mutableSetOf()
+        if (currentSet.contains(item.id)) {
+            currentSet.remove(item.id)
+        } else {
+            currentSet.add(item.id)
+        }
+        _selectedIds.value = currentSet
+        saveSelectedIds(currentSet)
     }
 
     /**
-     * Persists the entire item list to SharedPreferences in JSON format.
+     * Save the current list of items to SharedPreferences as JSON.
      */
     private fun saveItemList(list: List<Item>) {
         val json = gson.toJson(list)
         prefs.edit { putString(ITEMS_KEY, json) }
     }
+
+    /**
+     * Save the selected item IDs to SharedPreferences as a Set<String>.
+     */
+    private fun saveSelectedIds(ids: Set<Int>) {
+        val stringSet = ids.map { it.toString() }.toSet()
+        prefs.edit { putStringSet(SELECTED_IDS_KEY, stringSet) }
+    }
 }
+
